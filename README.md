@@ -14,7 +14,7 @@ It uses **React (Vite)** for the frontend, **Node.js + Express** for the backend
 - **Copy / Download / Clear** – Manage generated code easily.
 - **Modern Tailwind UI** – Clean, responsive, and professional design.
 - **Beginner-Friendly Output** – AI returns simple code using the easiest logic.
-- **Secure Backend** AI requests and Google authentication handled through Express.
+- **Secure Backend** - AI requests and Google authentication handled through Express.
 - **Secure Backend API** – Built with Express + Groq SDK.
 
 ---
