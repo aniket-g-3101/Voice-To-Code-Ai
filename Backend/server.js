@@ -1,59 +1,32 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
-import Groq from "groq-sdk";
 import passport from "passport";
 import { Strategy as GoogleStrategy } from "passport-google-oauth20";
-import session from "express-session";
+import jwt from "jsonwebtoken";
+import Groq from "groq-sdk";
 
 dotenv.config();
 
 const app = express();
-app.set("trust proxy", 1); // 🔴 REQUIRED FOR RENDER
 
 /* =========================
-   BASIC MIDDLEWARE
+   BASIC SETUP
 ========================= */
 
 app.use(express.json());
 
-/* =========================
-   CORS
-========================= */
-
 app.use(
   cors({
     origin: process.env.FRONTEND_URL,
-    credentials: true,
+    methods: ["GET", "POST", "DELETE"],
+    allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
 
 /* =========================
-   SESSION CONFIG
+   GOOGLE OAUTH (NO SESSION)
 ========================= */
-
-app.use(
-  session({
-    name: "voice-to-code-session",
-    secret: process.env.SESSION_SECRET,
-    resave: false,
-    saveUninitialized: false,
-    proxy: true, // 🔴 REQUIRED
-    cookie: {
-      secure: true,
-      httpOnly: true,
-      sameSite: "none",
-      maxAge: 24 * 60 * 60 * 1000,
-    },
-  })
-);
-
-/* =========================
-   PASSPORT SETUP
-========================= */
-
-app.use(passport.initialize());
-app.use(passport.session());
 
 passport.use(
   new GoogleStrategy(
@@ -74,31 +47,42 @@ passport.use(
   )
 );
 
-passport.serializeUser((user, done) => done(null, user));
-passport.deserializeUser((user, done) => done(null, user));
+app.use(passport.initialize());
 
 /* =========================
-   GROQ
+   JWT HELPERS
+========================= */
+
+const generateToken = (user) => {
+  return jwt.sign(user, process.env.JWT_SECRET, {
+    expiresIn: "1d",
+  });
+};
+
+const verifyToken = (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) {
+    return res.status(401).json({ error: "Missing token" });
+  }
+
+  const token = authHeader.split(" ")[1];
+  try {
+    req.user = jwt.verify(token, process.env.JWT_SECRET);
+    next();
+  } catch {
+    return res.status(401).json({ error: "Invalid token" });
+  }
+};
+
+/* =========================
+   GROQ SETUP
 ========================= */
 
 const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY,
 });
 
-/* =========================
-   MEMORY STORE (DEMO)
-========================= */
-
 const chatHistories = new Map();
-
-/* =========================
-   AUTH MIDDLEWARE
-========================= */
-
-const isAuthenticated = (req, res, next) => {
-  if (req.isAuthenticated()) return next();
-  return res.status(401).json({ error: "Unauthorized" });
-};
 
 /* =========================
    AUTH ROUTES
@@ -111,36 +95,23 @@ app.get(
 
 app.get(
   "/auth/google/callback",
-  passport.authenticate("google", {
-    failureRedirect: process.env.FRONTEND_URL,
-  }),
+  passport.authenticate("google", { session: false }),
   (req, res) => {
-    res.redirect(process.env.FRONTEND_URL);
+    const token = generateToken(req.user);
+    res.redirect(`${process.env.FRONTEND_URL}?token=${token}`);
   }
 );
 
-app.get("/auth/user", (req, res) => {
-  res.json({ user: req.user || null });
-});
-
-app.post("/auth/logout", (req, res) => {
-  req.logout(() => {
-    req.session.destroy(() => {
-      res.clearCookie("voice-to-code-session");
-      res.json({ message: "Logged out" });
-    });
-  });
-});
-
 /* =========================
-   AI GENERATION
+   PROTECTED ROUTES
 ========================= */
 
-app.post("/generate", isAuthenticated, async (req, res) => {
+app.post("/generate", verifyToken, async (req, res) => {
   try {
     const { prompt, sessionId = "default" } = req.body;
+
     if (!prompt?.trim()) {
-      return res.status(400).json({ error: "Prompt is required" });
+      return res.status(400).json({ error: "Prompt required" });
     }
 
     const key = `${req.user.id}_${sessionId}`;
@@ -165,8 +136,6 @@ app.post("/generate", isAuthenticated, async (req, res) => {
     const code = completion.choices[0].message.content;
     history.push({ role: "assistant", content: code });
 
-    if (history.length > 20) history.splice(0, history.length - 20);
-
     res.json({ code });
   } catch (err) {
     console.error(err);
@@ -174,27 +143,23 @@ app.post("/generate", isAuthenticated, async (req, res) => {
   }
 });
 
-/* =========================
-   HISTORY
-========================= */
-
-app.get("/history/:sessionId", isAuthenticated, (req, res) => {
+app.get("/history/:sessionId", verifyToken, (req, res) => {
   const key = `${req.user.id}_${req.params.sessionId}`;
   res.json({ history: chatHistories.get(key) || [] });
 });
 
-app.delete("/history/:sessionId", isAuthenticated, (req, res) => {
+app.delete("/history/:sessionId", verifyToken, (req, res) => {
   const key = `${req.user.id}_${req.params.sessionId}`;
   chatHistories.delete(key);
   res.json({ message: "History cleared" });
 });
 
 /* =========================
-   HEALTH
+   HEALTH CHECK
 ========================= */
 
-app.get("/", (req, res) => {
-  res.send("Voice-to-Code backend is running");
+app.get("/", (_, res) => {
+  res.send("Backend running with JWT auth");
 });
 
 /* =========================

@@ -19,37 +19,34 @@ export default function App() {
     checkAuth();
   }, []);
 
-  const checkAuth = async () => {
-    try {
-      const res = await fetch(`${API_URL}/auth/user`, {
-        credentials: "include",
-      });
-      const data = await res.json();
-      console.log("Auth check response:", data); // Debug log
-      setUser(data.user);
-    } catch (err) {
-      console.error("Auth check failed:", err);
-    } finally {
-      setCheckingAuth(false);
+  useEffect(() => {
+  const params = new URLSearchParams(window.location.search);
+  const token = params.get("token");
+
+  if (token) {
+    localStorage.setItem("token", token);
+    window.history.replaceState({}, document.title, "/");
+    setUser({}); // mark as logged in
+    setCheckingAuth(false);
+  } else {
+    const savedToken = localStorage.getItem("token");
+    if (savedToken) {
+      setUser({});
     }
-  };
+    setCheckingAuth(false);
+  }
+}, []);
+
 
   const handleGoogleLogin = () => {
     window.location.href = `${API_URL}/auth/google`;
   };
-
-  const handleLogout = async () => {
-    try {
-      await fetch(`${API_URL}/auth/logout`, {
-        method: "POST",
-        credentials: "include",
-      });
-      setUser(null);
-      setMessages([]);
-    } catch (err) {
-      console.error("Logout failed:", err);
-    }
-  };
+const handleLogout = () => {
+  localStorage.removeItem("token");
+  setUser(null);
+  setMessages([]);
+  window.location.href = "/";
+};
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
@@ -73,14 +70,17 @@ export default function App() {
 
     try {
       const res = await fetch(`${API_URL}/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include", // Important for cookies
-        body: JSON.stringify({
-          prompt: finalPrompt,
-          sessionId: sessionId,
-        }),
-      });
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${localStorage.getItem("token")}`,
+  },
+  body: JSON.stringify({
+    prompt: finalPrompt,
+    sessionId: sessionId,
+  }),
+});
+
 
       if (res.status === 401) {
         throw new Error("Please log in to continue");
@@ -115,10 +115,13 @@ export default function App() {
 
   const clearChat = async () => {
     try {
-      await fetch(`${API_URL}/history/${sessionId}`, {
-        method: "DELETE",
-        credentials: "include",
-      });
+     await fetch(`${API_URL}/history/${sessionId}`, {
+  method: "DELETE",
+  headers: {
+    Authorization: `Bearer ${localStorage.getItem("token")}`,
+  },
+});
+
       setMessages([]);
     } catch (err) {
       console.error("Error clearing chat:", err);
