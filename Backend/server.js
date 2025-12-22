@@ -9,6 +9,7 @@ import session from "express-session";
 dotenv.config();
 
 const app = express();
+app.set("trust proxy", 1); // 🔴 REQUIRED FOR RENDER
 
 /* =========================
    BASIC MIDDLEWARE
@@ -17,12 +18,12 @@ const app = express();
 app.use(express.json());
 
 /* =========================
-   CORS (REQUIRED FOR COOKIES)
+   CORS
 ========================= */
 
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL, // Vercel frontend
+    origin: process.env.FRONTEND_URL,
     credentials: true,
   })
 );
@@ -37,10 +38,11 @@ app.use(
     secret: process.env.SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
+    proxy: true, // 🔴 REQUIRED
     cookie: {
-      secure: true,        // HTTPS only (Render + Vercel)
+      secure: true,
       httpOnly: true,
-      sameSite: "none",    // REQUIRED for cross-domain cookies
+      sameSite: "none",
       maxAge: 24 * 60 * 60 * 1000,
     },
   })
@@ -67,7 +69,7 @@ passport.use(
         name: profile.displayName,
         picture: profile.photos[0].value,
       };
-      return done(null, user);
+      done(null, user);
     }
   )
 );
@@ -76,7 +78,7 @@ passport.serializeUser((user, done) => done(null, user));
 passport.deserializeUser((user, done) => done(null, user));
 
 /* =========================
-   GROQ SETUP
+   GROQ
 ========================= */
 
 const groq = new Groq({
@@ -84,7 +86,7 @@ const groq = new Groq({
 });
 
 /* =========================
-   IN-MEMORY STORES (DEMO)
+   MEMORY STORE (DEMO)
 ========================= */
 
 const chatHistories = new Map();
@@ -109,7 +111,9 @@ app.get(
 
 app.get(
   "/auth/google/callback",
-  passport.authenticate("google", { failureRedirect: process.env.FRONTEND_URL }),
+  passport.authenticate("google", {
+    failureRedirect: process.env.FRONTEND_URL,
+  }),
   (req, res) => {
     res.redirect(process.env.FRONTEND_URL);
   }
@@ -129,44 +133,36 @@ app.post("/auth/logout", (req, res) => {
 });
 
 /* =========================
-   AI GENERATION ROUTE
+   AI GENERATION
 ========================= */
 
 app.post("/generate", isAuthenticated, async (req, res) => {
   try {
     const { prompt, sessionId = "default" } = req.body;
-
     if (!prompt?.trim()) {
       return res.status(400).json({ error: "Prompt is required" });
     }
 
-    const userSessionId = `${req.user.id}_${sessionId}`;
-
-    if (!chatHistories.has(userSessionId)) {
-      chatHistories.set(userSessionId, []);
-    }
-
-    const history = chatHistories.get(userSessionId);
+    const key = `${req.user.id}_${sessionId}`;
+    if (!chatHistories.has(key)) chatHistories.set(key, []);
+    const history = chatHistories.get(key);
 
     history.push({ role: "user", content: prompt });
 
-    const messages = [
-      {
-        role: "system",
-        content:
-          "You are a coding assistant. Generate clean beginner-friendly code only. No explanation unless asked.",
-      },
-      ...history,
-    ];
-
     const completion = await groq.chat.completions.create({
       model: "llama-3.1-8b-instant",
-      messages,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are a coding assistant. Generate clean beginner-friendly code only.",
+        },
+        ...history,
+      ],
       temperature: 0.1,
     });
 
     const code = completion.choices[0].message.content;
-
     history.push({ role: "assistant", content: code });
 
     if (history.length > 20) history.splice(0, history.length - 20);
@@ -179,7 +175,7 @@ app.post("/generate", isAuthenticated, async (req, res) => {
 });
 
 /* =========================
-   CHAT HISTORY ROUTES
+   HISTORY
 ========================= */
 
 app.get("/history/:sessionId", isAuthenticated, (req, res) => {
@@ -194,7 +190,7 @@ app.delete("/history/:sessionId", isAuthenticated, (req, res) => {
 });
 
 /* =========================
-   HEALTH CHECK
+   HEALTH
 ========================= */
 
 app.get("/", (req, res) => {
@@ -202,7 +198,7 @@ app.get("/", (req, res) => {
 });
 
 /* =========================
-   START SERVER (RENDER)
+   START SERVER
 ========================= */
 
 const PORT = process.env.PORT || 5000;
