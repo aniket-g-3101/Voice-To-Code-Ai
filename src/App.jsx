@@ -19,6 +19,25 @@ export default function App() {
     checkAuth();
   }, []);
 
+  useEffect(() => {
+  const params = new URLSearchParams(window.location.search);
+  const token = params.get("token");
+
+  if (token) {
+    localStorage.setItem("token", token);
+    window.history.replaceState({}, document.title, "/");
+    setUser({}); // mark as logged in
+    setCheckingAuth(false);
+  } else {
+    const savedToken = localStorage.getItem("token");
+    if (savedToken) {
+      setUser({});
+    }
+    setCheckingAuth(false);
+  }
+}, []);
+
+
   const checkAuth = async () => {
     try {
       const res = await fetch(`${API_URL}/auth/user`, {
