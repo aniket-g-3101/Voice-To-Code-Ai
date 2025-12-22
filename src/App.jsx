@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+const API_URL = import.meta.env.VITE_API_URL;
 
 export default function App() {
   const [prompt, setPrompt] = useState("");
@@ -20,7 +21,7 @@ export default function App() {
 
   const checkAuth = async () => {
     try {
-      const res = await fetch("http://localhost:5000/auth/user", {
+      const res = await fetch(`${API_URL}/auth/user`, {
         credentials: "include",
       });
       const data = await res.json();
@@ -34,12 +35,12 @@ export default function App() {
   };
 
   const handleGoogleLogin = () => {
-    window.location.href = "http://localhost:5000/auth/google";
+    window.location.href = `${API_URL}/auth/google`;
   };
 
   const handleLogout = async () => {
     try {
-      await fetch("http://localhost:5000/auth/logout", {
+      await fetch(`${API_URL}/auth/logout`, {
         method: "POST",
         credentials: "include",
       });
@@ -71,7 +72,7 @@ export default function App() {
     setLoading(true);
 
     try {
-      const res = await fetch("http://localhost:5000/generate", {
+      const res = await fetch(`${API_URL}/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include", // Important for cookies
@@ -114,7 +115,7 @@ export default function App() {
 
   const clearChat = async () => {
     try {
-      await fetch(`http://localhost:5000/history/${sessionId}`, {
+      await fetch(`${API_URL}/history/${sessionId}`, {
         method: "DELETE",
         credentials: "include",
       });
