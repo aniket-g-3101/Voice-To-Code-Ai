@@ -8,10 +8,21 @@ import Groq from "groq-sdk";
 
 dotenv.config();
 
+/* =========================
+   ENV VALIDATION (CRITICAL)
+========================= */
+
+if (!process.env.JWT_SECRET) {
+  throw new Error("❌ JWT_SECRET is missing in environment variables");
+}
+if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+  throw new Error("❌ Google OAuth env vars missing");
+}
+
 const app = express();
 
 /* =========================
-   BASIC SETUP
+   BASIC MIDDLEWARE
 ========================= */
 
 app.use(express.json());
@@ -25,7 +36,7 @@ app.use(
 );
 
 /* =========================
-   GOOGLE OAUTH (NO SESSION)
+   PASSPORT GOOGLE OAUTH
 ========================= */
 
 passport.use(
@@ -36,13 +47,17 @@ passport.use(
       callbackURL: `${process.env.BACKEND_URL}/auth/google/callback`,
     },
     (accessToken, refreshToken, profile, done) => {
-      const user = {
-        id: profile.id,
-        email: profile.emails[0].value,
-        name: profile.displayName,
-        picture: profile.photos[0].value,
-      };
-      done(null, user);
+      try {
+        const user = {
+          id: profile.id,
+          email: profile.emails?.[0]?.value,
+          name: profile.displayName,
+          picture: profile.photos?.[0]?.value,
+        };
+        done(null, user);
+      } catch (err) {
+        done(err, null);
+      }
     }
   )
 );
@@ -54,23 +69,32 @@ app.use(passport.initialize());
 ========================= */
 
 const generateToken = (user) => {
-  return jwt.sign(user, process.env.JWT_SECRET, {
-    expiresIn: "1d",
-  });
+  return jwt.sign(
+    {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      picture: user.picture,
+    },
+    process.env.JWT_SECRET,
+    { expiresIn: "1d" }
+  );
 };
 
 const verifyToken = (req, res, next) => {
   const authHeader = req.headers.authorization;
-  if (!authHeader) {
-    return res.status(401).json({ error: "Missing token" });
+
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).json({ error: "Unauthorized" });
   }
 
   const token = authHeader.split(" ")[1];
+
   try {
     req.user = jwt.verify(token, process.env.JWT_SECRET);
     next();
-  } catch {
-    return res.status(401).json({ error: "Invalid token" });
+  } catch (err) {
+    return res.status(401).json({ error: "Invalid or expired token" });
   }
 };
 
@@ -82,6 +106,10 @@ const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY,
 });
 
+/* =========================
+   IN-MEMORY CHAT STORE
+========================= */
+
 const chatHistories = new Map();
 
 /* =========================
@@ -90,12 +118,15 @@ const chatHistories = new Map();
 
 app.get(
   "/auth/google",
-  passport.authenticate("google", { scope: ["profile", "email"] })
+  passport.authenticate("google", {
+    scope: ["profile", "email"],
+    session: false,
+  })
 );
 
 app.get(
   "/auth/google/callback",
-  passport.authenticate("google", { session: false }),
+  passport.authenticate("google", { session: false, failureRedirect: "/" }),
   (req, res) => {
     const token = generateToken(req.user);
     res.redirect(`${process.env.FRONTEND_URL}?token=${token}`);
@@ -111,13 +142,13 @@ app.post("/generate", verifyToken, async (req, res) => {
     const { prompt, sessionId = "default" } = req.body;
 
     if (!prompt?.trim()) {
-      return res.status(400).json({ error: "Prompt required" });
+      return res.status(400).json({ error: "Prompt is required" });
     }
 
     const key = `${req.user.id}_${sessionId}`;
     if (!chatHistories.has(key)) chatHistories.set(key, []);
-    const history = chatHistories.get(key);
 
+    const history = chatHistories.get(key);
     history.push({ role: "user", content: prompt });
 
     const completion = await groq.chat.completions.create({
@@ -136,9 +167,11 @@ app.post("/generate", verifyToken, async (req, res) => {
     const code = completion.choices[0].message.content;
     history.push({ role: "assistant", content: code });
 
+    if (history.length > 20) history.splice(0, history.length - 20);
+
     res.json({ code });
   } catch (err) {
-    console.error(err);
+    console.error("Generate error:", err);
     res.status(500).json({ error: "AI generation failed" });
   }
 });
@@ -159,7 +192,7 @@ app.delete("/history/:sessionId", verifyToken, (req, res) => {
 ========================= */
 
 app.get("/", (_, res) => {
-  res.send("Backend running with JWT auth");
+  res.send("✅ Backend running with JWT auth");
 });
 
 /* =========================
@@ -168,5 +201,5 @@ app.get("/", (_, res) => {
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-  console.log(`Backend running on port ${PORT}`);
+  console.log(`🚀 Backend running on port ${PORT}`);
 });
